@@ -1,0 +1,65 @@
+extensions:
+  health_check:
+  zpages:
+    endpoint: :55679
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        # endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4319
+        cors:
+            allowed_origins:
+                - http://localhost:5173
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 50
+    spike_limit_percentage: 30
+  
+  batch:
+    
+  attributes:
+    actions:
+      - key: region
+        value: west
+        action: insert
+
+exporters:
+  debug:
+  otlp/jaeger:
+    endpoint: "${JAEGER_ENDPOINT}"
+    tls:
+      insecure: true
+  otlp/aspire:
+    endpoint: "${ASPIRE_DASHBOARD_ENDPOINT}"
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes, batch]
+      exporters: [debug, otlp/jaeger, otlp/aspire]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug, prometheus, otlp/aspire]
+    logs:
+      receivers: [otlp]
+      processors: []
+      exporters: [loki, debug, otlp/aspire]
+
+  extensions:
+    - health_check
+    - zpages

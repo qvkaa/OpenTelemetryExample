@@ -1,0 +1,100 @@
+﻿services:
+  client.api:
+    image: client.api
+    restart: always
+    build:
+      context: .
+      dockerfile: src/Client.Api/Dockerfile
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      notificationApiUrl: http://notification.api:8080
+    ports:  
+      - "8080:8080"
+  notification.api:
+    image: notification.api
+    restart: always
+    build:
+      context: .
+      dockerfile: src/Notification.Api/Dockerfile
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    ports:
+      - "8081:8080"
+  
+  react-app:
+    build: 
+      context: ./fe
+      dockerfile: Dockerfile.react
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./fe:/app         # This mounts the 'fe' directory to '/app' in the container
+      - /app/node_modules # This masks the '/app/node_modules' directory in the container
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    command: npm run dev
+
+  aspire-dashboard:
+    image: mcr.microsoft.com/dotnet/nightly/aspire-dashboard:8.0.0
+    ports:
+      - "18888:18888"
+      # - "4317:18889"
+    environment:
+      - DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true
+      # - DOTNET_DASHBOARD_CONFIG_FILE_PATH=/etc/aspire/config.json
+    volumes:
+      - ./config/dev/aspire:/etc/aspire
+      - ./data/aspnet-keys:/home/app/.aspnet/DataProtection-Keys
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.58.0
+    ports:
+      - "16686:16686" # Jaeger Web UI
+        
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+        
+  grafana:
+    image: grafana/grafana:10.4.4
+    volumes:
+      - ./grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+    ports:
+      - "3000:3000"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.103.0
+    volumes:
+      - ./otel-collector/otel-collector-config.yml:/etc/otel/config.yaml
+      - ./log:/log/otel
+    command: --config /etc/otel/config.yaml
+    environment:
+      JAEGER_ENDPOINT: "jaeger:4317"
+      ASPIRE_DASHBOARD_ENDPOINT: "aspire-dashboard:18889"
+    ports:
+      - "8889:8889"   # Prometheus metrics exporter (scrape endpoint)
+      - "13133:13133" # health_check extension
+      - "55679:55679" # ZPages extension
+      - "4317:4317"   # OTLP Receiver grpc
+      - "4319:4319" # OTLP Receiver http
+    depends_on:
+      - jaeger
+      - prometheus
+      - loki
+      - aspire-dashboard
+        
+  loki:
+    image: grafana/loki:2.7.1
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
